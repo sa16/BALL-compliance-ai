@@ -1,7 +1,7 @@
 import uuid
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy import Column, String, JSON, ForeignKey, UniqueConstraint, Text, DateTime, func
+from sqlalchemy import Column, String, JSON, ForeignKey, UniqueConstraint, Text, DateTime, func, Integer
 import datetime
 
 Base = declarative_base() # lauches a fresh drawing board
@@ -48,6 +48,32 @@ class InternalPolicy(Base):
     __table_args__=(
         UniqueConstraint("name", "version", name="uq_policy_name_version"),
     )
+
+class DocumentChunk(Base):
+    """
+    The atomic unit of retrieval - stores paragraphs drawn from regulations & internal polices to be used as chunks for vec embedding.
+    Serves as the backup & sources of truth for the managed vector store.
+    """
+    __tablename__ = "document_chunks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source_id = Column(UUID(as_uuid=True), nullable=False) #can be either regualation & policy
+    source_type = Column(String, nullable=False)
+    chunk_index = Column(Integer, nullable=False)
+    text_content = Column(Text, nullable=False)
+    chunk_metadata= Column(JSON, nullable=True)
+    embedding_id = Column(String, nullable=True) # id in QDRANT
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    #adding unique constraint to ensure accurate chunk ordering & no duplication of chunks
+
+    __table_args__ = (
+        UniqueConstraint("source_id", "source_type", "chunk_index", name="uq_document_chunk_order")
+        ,)
+
+
 
 class ComplianceResult(Base):
     __tablename__ = "compliance_results"
