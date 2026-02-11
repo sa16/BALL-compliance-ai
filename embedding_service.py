@@ -52,6 +52,12 @@ class EmbeddingService:
         
         raise Exception('Embedding pipeline failed after multiple retries!')
     
+    def get_embedding(self, text: str):
+        """
+        wrapper method for get_embeddings_batch: returns a single text embedding.
+        """
+        return self.get_embeddings_batch([text])[0]
+    
 embedding_service = EmbeddingService()
         
 
