@@ -58,7 +58,11 @@ class ComplianceAgent:
             meta= chunk.chunk_metadata or {} #will cause type error if we don't return an empty dict
             ref = meta.get('section') or meta.get('version') or "Unknown"
 
-            source_header = f"[{source_id}: {chunk.source_type.upper()} - {ref}\n]"
+            source_header = f"[{source_id}: {chunk.source_type.upper()} - {ref}]"
+
+            #logging the mapping
+            logger.info(f"  mapped {source_id}: {chunk.source_type.upper()} ({ref}) [Score: {score:.2f}]")
+
             context_parts.append(f'{source_header}\n{chunk.text_content}\n')
 
         return "\n".join(context_parts), valid_sources, entity_counts
