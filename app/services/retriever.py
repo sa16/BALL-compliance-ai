@@ -1,10 +1,10 @@
 import logging
 from sqlalchemy.orm import Session
-from embedding_service import embedding_service
+from .embedding_service import embedding_service
 from qdrant_client.http import models
-from database import init_db_connection, SessionLocal
-from vector_store import COLLECTION_NAME, get_qdrant_client
-from models import DocumentChunk
+from app.db.session import init_db_connection, SessionLocal
+from app.services.vector_store import COLLECTION_NAME, get_qdrant_client
+from app.db.models import DocumentChunk
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
 logger = logging.getLogger(__name__)
@@ -15,9 +15,11 @@ SIMILARITY_THRESHOLD = 0.3
 # high threshold recall results might be misleading.....for instance, if nothing is recalled, this might be interpreted as no matching
 #regulations
 
-TOP_K = 5
+#TOP_K = 5
+REGULATION_TOP_K=3
+POLICY_TOP_K=3
 
-def retrieve_relevant_chunks(query: str, session: Session,limit: int = TOP_K)-> list[tuple[DocumentChunk, float]]:
+def retrieve_balanced_chunks(query: str, session: Session,policy_filter_id: str= None)-> list[tuple[DocumentChunk, float]]:
     """
     **Semantic Search Layer**
 
@@ -38,10 +40,14 @@ def retrieve_relevant_chunks(query: str, session: Session,limit: int = TOP_K)-> 
         return []
     
     try:
-        search_result = client.query_points(
+        reg_filter= models.Filter(
+            must = [models.FieldCondition(key="source_type", match=models.MatchValue(value="regulation"))]
+        )
+        reg_results = client.query_points(
             collection_name=COLLECTION_NAME,
             query=query_vector,
-            limit=limit,
+            limit=REGULATION_TOP_K,
+            query_filter=reg_filter,
             with_payload=True,
             score_threshold=SIMILARITY_THRESHOLD
         ).points
@@ -49,8 +55,34 @@ def retrieve_relevant_chunks(query: str, session: Session,limit: int = TOP_K)-> 
     except Exception as e:
         logger.error(f'Qdrant search failed: {e}')
         return []
+    
+    #search policies
+    try:
+        policy_conditions= [models.FieldCondition(key="source_type", match=models.MatchValue(value="policy"))]
+        #scoped results
+        if policy_filter_id:
+            logger.info(f"Scoping retrieval to Policy ID: {policy_filter_id}")
+            policy_conditions.append(
+                models.FieldCondition(key="source_id", match=models.MatchValue(value=str(policy_filter_id)))
+                )
+        pol_filter = models.Filter(must=policy_conditions)
 
-    if not search_result:
+        pol_results = client.query_points(
+            collection_name=COLLECTION_NAME,
+            query=query_vector,
+            limit=POLICY_TOP_K,
+            query_filter=pol_filter,
+            with_payload=True,
+            score_threshold=SIMILARITY_THRESHOLD
+        ).points
+
+    except Exception as e:
+        logger.error(f'Qdrant search failed: {e}')
+        return []
+    
+    all_points = reg_results+pol_results
+
+    if not all_points:
         logger.info("No relevant results found.")
         return []
     
@@ -66,7 +98,7 @@ def retrieve_relevant_chunks(query: str, session: Session,limit: int = TOP_K)-> 
     #initial approach is not optimal at scale (O(N+1)) below batching approach runs in constant time.
 
     #batching qdrant results:
-    score_map = {points.id:points.score for points in search_result}
+    score_map = {points.id:points.score for points in all_points}
     target_ids = list(score_map.keys())
 
     relevant_chunks=[]
@@ -79,7 +111,7 @@ def retrieve_relevant_chunks(query: str, session: Session,limit: int = TOP_K)-> 
 
     chunk_map = {str(c.id):c for c in chunks}
 
-    for points in search_result:
+    for points in all_points:
         chunk_id = points.id
         if chunk_id in chunk_map:
             doc_chunk = chunk_map[chunk_id]
@@ -99,7 +131,7 @@ if __name__ == "__main__":
 
         test_query = "What are the requirements for exit strategies?"
         logger.info(f'testing retreival for test query: {test_query}')
-        results = retrieve_relevant_chunks(test_query, session, limit=TOP_K)
+        results = retrieve_balanced_chunks(test_query, session, policy_filter_id=None)
 
         logger.info(f'returned {len(results)} chunks.')
 

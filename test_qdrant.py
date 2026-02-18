@@ -2,7 +2,7 @@ import logging
 import uuid
 import random
 from qdrant_client.http import models
-from vector_store import get_qdrant_client, init_qdrant_collection, COLLECTION_NAME, VECTOR_SIZE
+from app.services.vector_store import get_qdrant_client, init_qdrant_collection, COLLECTION_NAME, VECTOR_SIZE
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
 logger = logging.getLogger(__name__)

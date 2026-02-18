@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 import logging
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
-from models import Base
+from app.db.models import Base
 import time
 
 logging.basicConfig(level=logging.INFO)

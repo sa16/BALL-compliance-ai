@@ -1,10 +1,10 @@
 import sys
 import os
 import logging
-from database import init_db_connection, SessionLocal
+from app.db.session import init_db_connection, SessionLocal
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from models import Regulation, InternalPolicy
+from app.db.models import Regulation, InternalPolicy
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
 

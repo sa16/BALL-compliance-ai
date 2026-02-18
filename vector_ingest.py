@@ -1,10 +1,10 @@
 import logging
-from embedding_service import embedding_service
+from app.services.embedding_service import embedding_service
 from qdrant_client.http import models
 from sqlalchemy.orm import Session
-from vector_store import init_qdrant_collection, get_qdrant_client, COLLECTION_NAME
-from models import DocumentChunk
-from database import init_db_connection, SessionLocal
+from app.services.vector_store import init_qdrant_collection, get_qdrant_client, COLLECTION_NAME
+from app.db.models import DocumentChunk
+from app.db.session import init_db_connection, SessionLocal
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")

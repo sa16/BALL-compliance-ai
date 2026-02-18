@@ -2,8 +2,8 @@ import logging
 import json
 import time
 from sqlalchemy.orm import Session
-from database import init_db_connection, SessionLocal
-from agent import ComplianceAgent
+from app.db.session import init_db_connection, SessionLocal
+from app.services.compliance_agent import ComplianceAgent
 
 # Configure simple logging
 logging.basicConfig(level=logging.INFO, format="%(message)s")

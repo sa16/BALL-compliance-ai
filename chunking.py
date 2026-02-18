@@ -1,7 +1,7 @@
 import logging
 from sqlalchemy.orm import Session
-from models import Regulation, InternalPolicy, DocumentChunk
-from database import init_db_connection, SessionLocal
+from app.db.models import Regulation, InternalPolicy, DocumentChunk
+from app.db.session import init_db_connection, SessionLocal
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
 

@@ -6,8 +6,8 @@ from typing import List, Literal, Optional
 import os
 import re
 from sqlalchemy.orm import Session
-from database import init_db_connection, SessionLocal
-from retriever import retrieve_relevant_chunks
+from app.db.session import init_db_connection, SessionLocal
+from app.services.retriever import retrieve_balanced_chunks
 from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
@@ -74,7 +74,7 @@ class ComplianceAgent:
         for cite in response.citations:
             match = re.search(r'source \d+', cite, re.IGNORECASE)
             if match:
-                extracted_source = match.group(0)
+                extracted_source = match.group(0).title()
                 if extracted_source in valid_set:
                     clean_citations.append(cite)
                 else:
@@ -85,9 +85,9 @@ class ComplianceAgent:
         response.citations = clean_citations
         return response
     
-    def analyze(self, query: str, session: Session)->dict:
-        logger.info(f'retrieving evidence for query: {query}')
-        chunks = retrieve_relevant_chunks(query, session)
+    def analyze(self, query: str, session: Session, policy_filter_id: str = None)->dict:
+        logger.info(f'retrieving evidence for query: {query} (filter: {policy_filter_id})')
+        chunks = retrieve_balanced_chunks(query, session, policy_filter_id=policy_filter_id)
 
         if not chunks:
             logger.warning("No evidence found (retriever returned 0)") 
