@@ -13,6 +13,7 @@ class ComplianceResponse(BaseModel):
     confidence: Literal["HIGH", "MEDIUM", "LOW"]
     reasoning: str
     citations: List[str]
+    intent: str = "UNKNOWN"
 
 class PolicyItem(BaseModel):
     id: str

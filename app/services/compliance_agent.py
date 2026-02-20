@@ -9,11 +9,13 @@ from sqlalchemy.orm import Session
 from app.db.session import init_db_connection, SessionLocal
 from app.services.retriever import retrieve_balanced_chunks
 from dotenv import load_dotenv
+from functools import lru_cache
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
 logger = logging.getLogger(__name__)
 
 LLM_MODEL = "gpt-4o-mini"
+BANK_NAME = os.getenv("BANK NAME", "BAL")
 
 #Pydantic contracts - first level of anti-hallucination measure
 #LLM responses will stricly meet given contract labels
@@ -22,13 +24,54 @@ class ComplianceResponse(BaseModel):
     confidence: Literal["HIGH", "MEDIUM", "LOW"]
     reasoning: str
     citations: List[str]
+    intent: str = "UNKNOWN"
 
+class intentResponse(BaseModel):
+    category: Literal["COMPLIANCE_AUDIT", "SYSTEM_METADATA", "REJECT"]
+
+@lru_cache(maxsize=512)
+def _cache_intent_classification(query: str, api_key: str)->str:
+    client = OpenAI(api_key=api_key)
+    system_prompt="""
+                    You are a Query Router for a Banking Compliance AI.
+                    Classify the user query into exactly one category:
+                    1. COMPLIANCE_AUDIT: Questions comparing internal policies to regulations.
+                    2. SYSTEM_METADATA: Questions asking "What is the bank's name?", "Who are you?".
+                    3. REJECT: Questions unrelated to banking/compliance (weather, jokes).
+                    OUTPUT JSON: {"category": "COMPLIANCE_AUDIT" | "SYSTEM_METADATA" | "REJECT"}
+                    """
+    try:
+        response= client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "system", "content": system_prompt},
+                    {"role": "user", "content": query}],
+            temperature=0.0,
+            max_tokens=50,
+            response_format={"type":"json_object"}
+            )
+
+        data = json.loads(response.choices[0].message.content)
+        return intentResponse(**data).category
+    except Exception:
+        return "ERROR"
+        
 class ComplianceAgent:
     def __init__(self):
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
+        self.api_key = os.getenv("OPENAI_API_KEY")
+        if not self.api_key:
             raise ValueError("openai api key not found.")
-        self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(api_key=self.api_key)
+        
+    def classify_intent(self, query: str)->str:
+        result = _cache_intent_classification(query,self.api_key)
+
+        if result=="ERROR":
+            logger.error("Intent classification failed, defaulting to REJECT")
+            return "REJECT"
+        return result
+        
+
+        
 
     def assemble_context(self,chunks: List)->tuple[str, List[str],dict]:
         """
@@ -86,6 +129,25 @@ class ComplianceAgent:
         return response
     
     def analyze(self, query: str, session: Session, policy_filter_id: str = None)->dict:
+
+        intent = self.classify_intent(query)
+        logger.info(f"🧠 Query Intent: {intent}")
+
+        # 2. HANDLE FAST PATHS
+        if intent == "REJECT":
+            return self._build_inconclusive_response(
+                "This query appears unrelated to banking compliance. Access denied.", intent
+            )
+        
+        if intent == "SYSTEM_METADATA":
+            return ComplianceResponse(
+                status="PASS",
+                confidence="HIGH",
+                reasoning=f"I am the {BANK_NAME} Compliance Engine.",
+                citations=[],
+                intent=intent
+            ).model_dump()
+        
         logger.info(f'retrieving evidence for query: {query} (filter: {policy_filter_id})')
         chunks = retrieve_balanced_chunks(query, session, policy_filter_id=policy_filter_id)
 
@@ -161,12 +223,23 @@ class ComplianceAgent:
 
         
         
-    def _build_inconclusive_response(self, reason: str):
+    def _build_inconclusive_response(self, reason: str, intent: str = "UNKNOWN")->ComplianceResponse:
         return ComplianceResponse(
             status="INCONCLUSIVE",
             reasoning=reason,
             confidence="LOW",
-            citations=[]
+            citations=[],
+            intent= intent
+        ).model_dump()
+    
+    def _build_error_response(self, reason: str, intent: str = "UNKNOWN")->ComplianceResponse:
+        return ComplianceResponse(
+            status="INCONCLUSIVE",
+            reasoning=reason,
+            confidence="LOW",
+            citations=[],
+            intent= intent
+            
         ).model_dump()
     
 if __name__=="__main__":

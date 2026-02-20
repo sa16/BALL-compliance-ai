@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { AlertTriangle, XCircle, Search, FileText, CheckCircle2, BarChart3, Lock,ShieldCheck } from 'lucide-react';
+import { AlertTriangle, XCircle, Search, FileText, CheckCircle2, BarChart3, Lock, ShieldCheck } from 'lucide-react';
 
 // --- Types ---
 interface Policy {
@@ -12,6 +12,7 @@ interface AuditResult {
   confidence: "HIGH" | "MEDIUM" | "LOW";
   reasoning: string;
   citations: string[];
+  intent: string;
 }
 
 function App() {
@@ -73,6 +74,16 @@ function App() {
     }
   };
 
+  // --- Helper: Intent Badge Styles ---
+  const getIntentBadge = (intent: string) => {
+    switch (intent) {
+      case 'COMPLIANCE_AUDIT': return 'bg-purple-100 text-purple-800 border-purple-200';
+      case 'SYSTEM_METADATA': return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'REJECT': return 'bg-gray-100 text-gray-800 border-gray-200';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-100">
       
@@ -80,8 +91,7 @@ function App() {
       <nav className="bg-white border-b border-slate-200 px-6 py-3 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {/* If you have logo.png in /public, it shows here. Otherwise fallback text. */}
-            <img src="/public/logo2.png" alt="BAL Logo" className="h-24 w-24 object-contain rounded-lg" onError={(e) => e.currentTarget.style.display = 'none'} />
+            <img src="/public/bal-logo2.jpeg" alt="BAL Logo" className="h-16 w-16 object-contain rounded-lg" onError={(e) => e.currentTarget.style.display = 'none'} />
             <span className="text-slate-900 font-bold text-xl tracking-tight">Omni<span className="font-light text-slate-500">Compliance</span></span>
           </div>
           <div className="flex items-center gap-4">
@@ -174,7 +184,13 @@ function App() {
                   {result.status === 'INCONCLUSIVE' && <AlertTriangle className="h-8 w-8"/>}
                   <div>
                     <h3 className="text-2xl font-bold tracking-tight">{result.status}</h3>
-                    <p className="text-sm font-medium opacity-80">Compliance Assessment</p>
+                    {/* Intent Badge */}
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase tracking-wider ${getIntentBadge(result.intent)}`}>
+                        {result.intent}
+                      </span>
+                      <p className="text-sm font-medium opacity-80">Compliance Assessment</p>
+                    </div>
                   </div>
                 </div>
                 <div className="text-right">
