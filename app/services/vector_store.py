@@ -2,6 +2,7 @@ import logging
 import os
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
+import time
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
 logger = logging.getLogger(__name__)
@@ -16,10 +17,12 @@ def get_qdrant_client():
     Returns a qrant client instance
     
     """
-    host = os.getenv("QDRANT_HOST", "localhost")
-    port = int(os.getenv("QDRANT_PORT", 6333))
+    #refactored to support both Local (http://localhost:6333) and Cloud (https://xyz.qdrant.tech)
+    url = os.getenv("QDRANT_URL", "https://localhost")
+   # port = int(os.getenv("QDRANT_PORT", 6333))
+    api_key= os.getenv("QDRANT_API_KEY")
 
-    return QdrantClient(host=host, port=port)
+    return QdrantClient(url=url, api_key=api_key)
 
 #setting up the vector collection in qdrant
 
@@ -28,7 +31,12 @@ def init_qdrant_collection():
     idempotent initialization of the vector collection (skips if already exists)
 
     """
-    client = get_qdrant_client()
+    for attempt in range(5):
+        try:
+            client = get_qdrant_client()
+            break
+        except Exception:
+            time.sleep(2**attempt)
 
     try: 
         collections = client.get_collections().collections

@@ -25,12 +25,47 @@ services:
       - "6333:6333"
     volumes:
       - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:6333/readyz || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+    # healthcheck:
+    #   test: ["CMD-SHELL", "curl -f http://localhost:6333/readyz || exit 1"]
+    #   interval: 5s
+    #   timeout: 5s
+    #   retries: 5
+    #   start_period: 20s
+  
+  # 3. API (FastAPI Backend)
+  backend:
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+    container_name: ball_backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Use container names for internal networking
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - BANK_NAME=Bank of Anurag & Lalisa
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+
+  # 4. Dashboard (React Frontend)
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+    container_name: ball_frontend
+    ports:
+      - "80:80" # Maps localhost:80 to container:80
+    depends_on:
+      - backend
+
 
 volumes:
   postgres_data:
   qdrant_data:
+
