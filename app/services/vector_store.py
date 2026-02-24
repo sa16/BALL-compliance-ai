@@ -18,11 +18,19 @@ def get_qdrant_client():
     
     """
     #refactored to support both Local (http://localhost:6333) and Cloud (https://xyz.qdrant.tech)
-    url = os.getenv("QDRANT_URL", "https://localhost")
-   # port = int(os.getenv("QDRANT_PORT", 6333))
-    api_key= os.getenv("QDRANT_API_KEY")
 
-    return QdrantClient(url=url, api_key=api_key)
+    cloud_url = os.getenv("QDRANT_URL")
+    api_key = os.getenv("QDRANT_API_KEY")
+
+    # if cloud_url:
+    #     logger.info(f"connecting to qdrant cloud: {cloud_url[:20]}...")
+    #     return QdrantClient(url=cloud_url, api_key=api_key)
+    
+    host = os.getenv("QDRANT_HOST", "localhost")
+    port = int(os.getenv("QDRANT_PORT", 6333))
+    logger.info(f"connecting to qdrant local: {host}:{port}")
+
+    return QdrantClient(host=host, port=port)
 
 #setting up the vector collection in qdrant
 

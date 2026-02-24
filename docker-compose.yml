@@ -31,6 +31,7 @@ services:
     #   timeout: 5s
     #   retries: 5
     #   start_period: 20s
+
   
   # 3. API (FastAPI Backend)
   backend:
@@ -45,6 +46,8 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - BANK_NAME=Bank of Anurag & Lalisa
     depends_on:

@@ -153,18 +153,18 @@ class ComplianceAgent:
 
         if not chunks:
             logger.warning("No evidence found (retriever returned 0)") 
-            return self._build_inconclusive_response("No docs found.")
+            return self._build_inconclusive_response("No docs found.", intent)
         
         #Circuit breaker logi: find a reg with no matching policy, do not audit
 
         context_text, valid_sources, entity_counts = self.assemble_context(chunks)
         if entity_counts["regulation"]==0:
             logger.warning("Circuit Break: Found 0 Regulations.")
-            return self._build_inconclusive_response("No relevant regulations found to compare policy.")
+            return self._build_inconclusive_response("No relevant regulations found to compare policy.", intent)
         
         if entity_counts["policy"]==0:
             logger.warning("Circuit Break: Found 0 Polcies.")
-            return self._build_inconclusive_response("No relevant policy found to audit ")
+            return self._build_inconclusive_response("No relevant policy found to audit ", intent)
         
         system_prompt="""
                     Your are senior compliance officer for a tier-1 bank. Audit Internal policies against Regulatory obligations.
@@ -205,8 +205,9 @@ class ComplianceAgent:
             raw_content = response.choices[0].message.content
             try:
                 data=json.loads(raw_content)
-                structered_response = ComplianceResponse(**data)
-                final_response = self.verify_citations(structered_response,valid_sources)
+                data['intent']=intent
+                structured_response = ComplianceResponse(**data)
+                final_response = self.verify_citations(structured_response,valid_sources)
                 return final_response.model_dump()
             
             except json.JSONDecodeError:
