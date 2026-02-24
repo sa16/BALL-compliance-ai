@@ -63,6 +63,22 @@ def init_qdrant_collection():
         else: 
             logger.info(f'{COLLECTION_NAME} already exists. Waiting for data load.')
 
+        logger.info("Verifying indexes....")
+
+        client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="source_type",
+            field_schema=models.PayloadSchemaType.KEYWORD
+        )
+
+        client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="source_id",
+            field_schema=models.PayloadSchemaType.KEYWORD
+        )
+
+        logger.info("indexes set.")
+
     except Exception as e:
         logger.error(f'Failed to initialize Qdrant: {e}')
         raise
