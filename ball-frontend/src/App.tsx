@@ -23,9 +23,11 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const API_URL = import.meta.env.VITE_API_URL;
+
   // --- 1. Fetch Policies on Load ---
   useEffect(() => {
-    fetch('http://localhost:8000/policies')
+    fetch(`${API_URL}/policies`)
       .then(res => res.json())
       .then(data => setPolicies(data))
       .catch(err => {
@@ -41,7 +43,7 @@ function App() {
     setError(null);
     
     try {
-      const response = await fetch('http://localhost:8000/audit', {
+      const response = await fetch(`${API_URL}/audit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 

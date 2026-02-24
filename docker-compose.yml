@@ -44,8 +44,8 @@ services:
     environment:
       # Use container names for internal networking
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
+      # - QDRANT_HOST=qdrant
+      # - QDRANT_PORT=6333
       - QDRANT_URL=${QDRANT_URL}
       - QDRANT_API_KEY=${QDRANT_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
