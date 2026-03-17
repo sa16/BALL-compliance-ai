@@ -2,11 +2,14 @@ import logging
 from openai import RateLimitError, APIConnectionError, OpenAI
 import time
 from dotenv import load_dotenv
+from app.services.telemetry import TelemetryService
+from typing import Optional
 
 load_dotenv(override=True) # ensuring it reads open api key
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
-logger = logging.getLogger(__name__)
+# logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
+# logger = logging.getLogger(__name__)
+logger = logging.getLogger("json_logger")
 
 EMBEDDING_MODEL = "text-embedding-3-small"
 
@@ -15,7 +18,7 @@ class EmbeddingService:
     def __init__(self):
         self.client = OpenAI()
 
-    def get_embeddings_batch(self, text: list[str])->list[list[float]]:
+    def get_embeddings_batch(self, text: list[str], telemetry: Optional[TelemetryService]=None)->list[list[float]]:
         """
         creates batches of 20 text items & creates embeddings. 
         """
@@ -32,31 +35,37 @@ class EmbeddingService:
 
                 )
 
+                if telemetry:
+                    telemetry.track_embedding(response.usage.prompt_tokens, EMBEDDING_MODEL)
+
                 sorted_data = sorted(response.data, key = lambda x: x.index)
 
                 return [item.embedding for item in sorted_data]
         
             except RateLimitError:
-                logger.warning(f'Rate Limit hit, please retry in {delay}s...')
+                # logger.warning(f'Rate Limit hit, please retry in {delay}s...')
+                logger.warning({"event": "embedding_rate_limit", "retry_in_s": delay})
                 time.sleep(delay)
                 delay *=2
 
             except APIConnectionError:
-                logger.warning(f'api connection error, please retry in {delay}s...')
+                # logger.warning(f'api connection error, please retry in {delay}s...')
+                logger.warning({"event": "embedding_connection_error", "retry_in_s": delay})
                 time.sleep(delay)
                 delay *=2
 
             except Exception as e:
-                logger.error(f'Batch emebedding pipeline failed: {e}')
+                # logger.error(f'Batch emebedding pipeline failed: {e}')
+                logger.error({"event": "embedding_pipeline_failed", "error": str(e)})
                 raise
         
         raise Exception('Embedding pipeline failed after multiple retries!')
     
-    def get_embedding(self, text: str):
+    def get_embedding(self, text: str, telemetry: Optional[TelemetryService]=None):
         """
         wrapper method for get_embeddings_batch: returns a single text embedding.
         """
-        return self.get_embeddings_batch([text])[0]
+        return self.get_embeddings_batch([text], telemetry=telemetry)[0]
     
 embedding_service = EmbeddingService()
         

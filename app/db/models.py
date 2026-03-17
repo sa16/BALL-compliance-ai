@@ -1,7 +1,7 @@
 import uuid
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy import Column, String, JSON, ForeignKey, UniqueConstraint, Text, DateTime, func, Integer
+from sqlalchemy import Column, String, JSON, ForeignKey, UniqueConstraint, Text, DateTime, func, Integer, Float, Enum, Boolean
 import datetime
 
 Base = declarative_base() # lauches a fresh drawing board
@@ -101,6 +101,54 @@ class ComplianceResult(Base):
     #relationship
     regulation = relationship("Regulation", back_populates="compliance_results")
     policy = relationship("InternalPolicy", back_populates="compliance_results")
+
+class RequestMetric(Base):
+    __tablename__ = "request_metrics"
+
+    id= Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    request_id = Column(String, index=True, nullable=False)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
+    #after adding auth
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    
+    endpoint = Column(String)
+    intent = Column(String, default="UNKNOWN")
+    status_code=Column(Integer)
+    error_type=Column(String, nullable=True) # example: TIMEOUT, LLM_VALIDATION
+
+   
+    total_latency_ms = Column(Float)
+    routing_latency_ms = Column(Float, default=0.0)
+    retrieval_latency_ms = Column(Float, default=0.0)
+    llm_latency_ms = Column(Float, default=0.0)
+    
+    
+    prompt_tokens = Column(Integer, default=0)
+    completion_tokens = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    cost_usd = Column(Float, default=0.0)
+    
+    
+    model_name = Column(String, nullable=True)
+
+class Users(Base):
+    __tablename__= "users"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4())
+    username = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+
+    role = Column(
+        Enum('admin', 'auditor', name="user_roles"), default="auditor", nullable=False
+    )
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    
 
 
 

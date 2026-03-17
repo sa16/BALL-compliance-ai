@@ -1,13 +1,18 @@
 import logging
 from sqlalchemy.orm import Session
-from .embedding_service import embedding_service
+from app.services.embedding_service import embedding_service
 from qdrant_client.http import models
 from app.db.session import init_db_connection, SessionLocal
 from app.services.vector_store import COLLECTION_NAME, get_qdrant_client
 from app.db.models import DocumentChunk
+from app.services.telemetry import TelemetryService
+from typing import Optional
+from contextlib import nullcontext
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
-logger = logging.getLogger(__name__)
+# logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
+# logger = logging.getLogger(__name__)
+
+logger = logging.getLogger("json_logger")
 
 SIMILARITY_THRESHOLD = 0.3
 # higher thresholds might seem safer to have, however, a lower threshold improves recall volume. Then filter out results,
@@ -19,7 +24,7 @@ SIMILARITY_THRESHOLD = 0.3
 REGULATION_TOP_K=3
 POLICY_TOP_K=3
 
-def retrieve_balanced_chunks(query: str, session: Session,policy_filter_id: str= None)-> list[tuple[DocumentChunk, float]]:
+def retrieve_balanced_chunks(query: str, session: Session,policy_filter_id: str= None, telemetry: Optional[TelemetryService]=None)-> list[tuple[DocumentChunk, float]]:
     """
     **Semantic Search Layer**
 
@@ -34,50 +39,61 @@ def retrieve_balanced_chunks(query: str, session: Session,policy_filter_id: str=
     client = get_qdrant_client()
 
     try:
-        query_vector = embedding_service.get_embedding(query)
+        cm = telemetry.measure("embedding") if telemetry else nullcontext()
+        with cm:
+            query_vector = embedding_service.get_embedding(query, telemetry)
     except Exception as e:
-        logger.error(f'failed to embedd query: {e}')
+        logger.error({"event":"embedding_failed","error": str(e)})
+        if telemetry: telemetry.set_error("EMBEDDING_FAILURE")
         return []
     
     try:
-        reg_filter= models.Filter(
-            must = [models.FieldCondition(key="source_type", match=models.MatchValue(value="regulation"))]
-        )
-        reg_results = client.query_points(
-            collection_name=COLLECTION_NAME,
-            query=query_vector,
-            limit=REGULATION_TOP_K,
-            query_filter=reg_filter,
-            with_payload=True,
-            score_threshold=SIMILARITY_THRESHOLD
-        ).points
+        cm = telemetry.measure("vector_search") if telemetry else nullcontext()
+        with cm:
+            reg_filter= models.Filter(
+                must = [models.FieldCondition(key="source_type", match=models.MatchValue(value="regulation"))]
+            )
+            reg_results = client.query_points(
+                collection_name=COLLECTION_NAME,
+                query=query_vector,
+                limit=REGULATION_TOP_K,
+                query_filter=reg_filter,
+                with_payload=True,
+                score_threshold=SIMILARITY_THRESHOLD
+            ).points
 
     except Exception as e:
-        logger.error(f'Qdrant search failed: {e}')
+        # logger.error(f'Qdrant search failed: {e}')
+        logger.error({"event": "vector_search_failed", "error": str(e)})
+        if telemetry: telemetry.set_error("VECTOR_SEARCH_FAILURE")
         return []
     
     #search policies
     try:
-        policy_conditions= [models.FieldCondition(key="source_type", match=models.MatchValue(value="policy"))]
-        #scoped results
-        if policy_filter_id:
-            logger.info(f"Scoping retrieval to Policy ID: {policy_filter_id}")
-            policy_conditions.append(
-                models.FieldCondition(key="source_id", match=models.MatchValue(value=str(policy_filter_id)))
-                )
-        pol_filter = models.Filter(must=policy_conditions)
+        cm = telemetry.measure("vector_search") if telemetry else nullcontext()
+        with cm:
+            policy_conditions= [models.FieldCondition(key="source_type", match=models.MatchValue(value="policy"))]
+            #scoped results
+            if policy_filter_id:
+                logger.info(f"Scoping retrieval to Policy ID: {policy_filter_id}")
+                policy_conditions.append(
+                    models.FieldCondition(key="source_id", match=models.MatchValue(value=str(policy_filter_id)))
+                    )
+            pol_filter = models.Filter(must=policy_conditions)
 
-        pol_results = client.query_points(
-            collection_name=COLLECTION_NAME,
-            query=query_vector,
-            limit=POLICY_TOP_K,
-            query_filter=pol_filter,
-            with_payload=True,
-            score_threshold=SIMILARITY_THRESHOLD
-        ).points
+            pol_results = client.query_points(
+                collection_name=COLLECTION_NAME,
+                query=query_vector,
+                limit=POLICY_TOP_K,
+                query_filter=pol_filter,
+                with_payload=True,
+                score_threshold=SIMILARITY_THRESHOLD
+            ).points
 
     except Exception as e:
-        logger.error(f'Qdrant search failed: {e}')
+        # logger.error(f'Qdrant search failed: {e}')
+        logger.error({"event": "vector_search_failed", "error": str(e)})
+        if telemetry: telemetry.set_error("VECTOR_SEARCH_FAILURE")
         return []
     
     all_points = reg_results+pol_results
@@ -104,8 +120,12 @@ def retrieve_balanced_chunks(query: str, session: Session,policy_filter_id: str=
     relevant_chunks=[]
 
     try:
-        chunks = session.query(DocumentChunk).filter(DocumentChunk.id.in_(target_ids)).all()
+        cm = telemetry.measure("db_fetch") if telemetry else nullcontext()
+        with cm:
+            chunks = session.query(DocumentChunk).filter(DocumentChunk.id.in_(target_ids)).all()
     except Exception as e:
+        logger.error({"event": "db_fetch_failed", "error": str(e)})
+        if telemetry: telemetry.set_error("DB_FETCH_FAILURE")
         logger.error(f'failed to fetch from postgres db: {e}')
         return []
 
