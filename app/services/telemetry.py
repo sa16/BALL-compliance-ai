@@ -10,9 +10,10 @@ PRICING_REGISTRY={
 }
 
 class TelemetryService:
-    def __init__(self, request_id: str):
+    def __init__(self, request_id: str, user_id: Optional[str] = None):
         self.request_id = request_id
         self.logger = logging.getLogger("json_logger")
+        self.user_id = user_id
 
         self.metrics = {
             # High Level Stages
@@ -91,6 +92,7 @@ class TelemetryService:
         sorted_models = sorted(list(self.metrics["models_used"]))
         return {
             "request_id": self.request_id,
+            "user_id": self.user_id,
             "total_latency_ms": round((time.time() - self.start_time) * 1000, 2),
             "model_str": ", ".join(sorted_models),
             **self.metrics
