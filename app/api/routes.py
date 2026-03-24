@@ -71,7 +71,7 @@ def save_metrics_background(intent: str, status_code: int, endpoint: str, teleme
         #     "total_latency_ms": data["total_latency_ms"]
         # })
     except Exception as e:
-        logger.error({"event": "metrics_save_failed", "error": str(e)}) 
+        logger.error({"event": "metrics_save_failed", "error": type(e).__name__}) 
     finally:
         db.close()     
 
@@ -85,7 +85,7 @@ def list_policies(db: Session = Depends(get_db), current_user: Users = Depends(r
         policies = db.query(InternalPolicy).all() #not optimal, this is for mvp only
         return [{"id":str(p.id), "name": str(p.name)} for p in policies]
     except Exception as e:
-        logger.error({"event": "policy_list_error", "error": str(e)})
+        logger.error({"event": "policy_list_error", "error": type(e).__name__})
         raise HTTPException(status_code=500, detail="Internal Error")
     
 @router.post("/audit", response_model=ComplianceResponse)
@@ -118,7 +118,7 @@ def run_audit(request:AuditRequest, request_ctx: Request,background_tasks: Backg
 
         return result
     except Exception as e:
-            logger.error({"event": "audit_route_error", "request_id": req_id, "error": str(e)})
+            logger.error({"event": "audit_route_error", "request_id": req_id, "error": type(e).__name__})
         
             # Even on severe route failure, try to save what metrics we collected
             background_tasks.add_task(
