@@ -29,10 +29,17 @@ class TelemetryService:
             "completion_tokens": 0,
             "cost_usd": 0.0,
             "models_used": set(),
-            "error_type": None
+            "error_type": None, 
+            "is_cache_hit": False,
+            "cache_lookup_ms": 0.0,
+            "cache_layer": None
         }
 
         self.start_time = time.time()
+
+    def mark_cache_hit(self, layer: str):
+        self.metrics["cache_layer"]=layer
+        self.metrics["is_cache_hit"]=True
 
     @contextmanager
     def measure(self, stage: str):

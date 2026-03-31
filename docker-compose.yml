@@ -32,7 +32,16 @@ services:
     #   retries: 5
     #   start_period: 20s
 
-  
+  ball_redis:
+    image: redis:7-alpine
+    container_name: ball_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
   # 3. API (FastAPI Backend)
   backend:
     build:
@@ -50,11 +59,14 @@ services:
       - QDRANT_API_KEY=${QDRANT_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - BANK_NAME=Bank of Anurag & Lalisa
+      - REDIS_URL=${REDIS_URL}
     depends_on:
       postgres:
         condition: service_healthy
       qdrant:
         condition: service_started
+      ball_redis:
+        condition: service_healthy
 
   # 4. Dashboard (React Frontend)
   frontend:

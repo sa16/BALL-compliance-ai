@@ -13,6 +13,8 @@ from functools import lru_cache
 from app.services.telemetry import TelemetryService
 from collections import OrderedDict
 from contextlib import nullcontext
+import time
+from app.services.cache import cache_service
 
 # logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
 # logger = logging.getLogger(__name__)
@@ -74,9 +76,13 @@ class ComplianceAgent:
 
         
     def classify_intent(self, query: str, telemetry: Optional[TelemetryService]=None)->str:
-        if query in self._intent_cache:
-            self._intent_cache.move_to_end(query)
-            return self._intent_cache[query]
+        #check cache layers first
+
+        cache_intent = cache_service.get_intent(query)
+        if cache_intent: 
+            if telemetry: telemetry.mark_cache_hit("intent")
+            return cache_intent
+        
         cm = telemetry.measure("routing") if telemetry else nullcontext()
         with cm:
             system_prompt="""
@@ -101,9 +107,9 @@ class ComplianceAgent:
                 data = json.loads(response.choices[0].message.content)
                 intent = IntentResponse(**data).category
 
-                self._intent_cache[query]=intent
-                if len(self._intent_cache)>self._cache_max_size:
-                    self._intent_cache.popitem(last=False)
+                #save to redis
+                cache_service.set_intent(query, intent)
+
                 return intent
                     
             except Exception as e:
@@ -177,117 +183,189 @@ class ComplianceAgent:
         return response
     
     def analyze(self, query: str, session: Session, policy_filter_id: str = None, telemetry: Optional[TelemetryService]=None)->dict:
+        t0 = time.time()
+        #check reponse cache layer
+        cached_reponse = cache_service.get_response(query, policy_filter_id)
+        if cached_reponse: 
+            if telemetry:
+                telemetry.metrics["cache_lookup_ms"] = round((time.time() - t0) * 1000, 2)
+                telemetry.mark_cache_hit("response")
+            return cached_reponse
+        #stampede protection sequence
+        norm_query = cache_service._normalize(query)
+        lock_key = f"lock:response:{cache_service._hash(f'{norm_query}_{policy_filter_id}')}"
+        lock_token = cache_service.acquire_lock(lock_key)
 
-        intent = self.classify_intent(query, telemetry)
-        logger.info({"event": "intent_classified", "intent": intent})
+        if not lock_token:
+            # WAIT & RETRY (Coalescing)
+            logger.info({"event": "cache_lock_waiting", "query_hash": cache_service._hash(norm_query)})
+            for _ in range(4): # Wait up to 2 seconds total
+                time.sleep(0.5)
+                cached_wait = cache_service.get_response(query, policy_filter_id)
+                if cached_wait:
+                    if telemetry:
+                        telemetry.metrics["cache_lookup_ms"] = round((time.time() - t0) * 1000, 2)
+                        telemetry.mark_cache_hit("response_coalesced")
+                    return cached_wait
+        else:
+            #if a lock is acquired, we double check for safety
+            cached_double_check = cache_service.get_response(query, policy_filter_id)
+            if cached_double_check:
+                cache_service.release_lock(lock_key, lock_token)
+                if telemetry:
+                    telemetry.metrics["cache_lookup_ms"] = round((time.time() - t0) * 1000, 2)
+                    telemetry.mark_cache_hit("response")
+                return cached_double_check
 
-        # 2. HANDLE FAST PATHS
-        if intent == "REJECT":
-            return self._build_inconclusive_response(
-                "This query appears unrelated to banking compliance. Access denied.", intent
-            )
-        
-        if intent == "SYSTEM_METADATA":
-            return ComplianceResponse(
-                status="PASS",
-                confidence="HIGH",
-                reasoning=f"I am the {BANK_NAME} Compliance Engine.",
-                citations=[],
-                intent=intent
-            ).model_dump()
-        
-        # logger.info(f'retrieving evidence for query: {query} (filter: {policy_filter_id})')
-        logger.info({"event": "retrieval_start", "query": query, "policy_filter_id": policy_filter_id})
-        #cost measure for retrieval
-        cm_retrieval = telemetry.measure("retrieval") if telemetry else nullcontext()
-        with cm_retrieval:
-            chunks = retrieve_balanced_chunks(query, session, policy_filter_id=policy_filter_id, telemetry=telemetry)
+        if telemetry:
+            telemetry.metrics["cache_lookup_ms"] = round((time.time() - t0) * 1000, 2)
 
-        if not chunks:
-            # logger.warning("No evidence found (retriever returned 0)") 
-            logger.warning({"event": "circuit_break_empty_retrieval"}) 
-            if telemetry: telemetry.set_error("RETRIEVAL_EMPTY")
-            return self._build_inconclusive_response("No docs found.", intent)
-        
-        #Circuit breaker logi: find a reg with no matching policy, do not audit
+        """ENTER THE RAG_PIPELINE"""
 
-        context_text, valid_sources, entity_counts = self.assemble_context(chunks)
-        if entity_counts["regulation"]==0:
-            # logger.warning("Circuit Break: Found 0 Regulations.")
-            logger.warning({"event": "circuit_break_no_regs"}) 
-            if telemetry: telemetry.set_error("RETRIEVAL_MISSING_REGS")
-            return self._build_inconclusive_response("No relevant regulations found to compare policy.", intent)
-        
-        if entity_counts["policy"]==0:
-            # logger.warning("Circuit Break: Found 0 Polcies.")
-            logger.warning({"event": "circuit_break_no_policy"}) 
-            if telemetry: telemetry.set_error("RETRIEVAL_MISSING_POLICY")
-            return self._build_inconclusive_response("No relevant policy found to audit ", intent)
-        
-        system_prompt="""
-                    Your are senior compliance officer for a tier-1 bank. Audit Internal policies against Regulatory obligations.
-
-                    INSTRUCTIONS:
-                    -Compare Policies vs Regulations
-                    -Mark PASS if fully compliant
-                    -Mark FAIL if a specific requirement is missing or contradicted
-                    -Mark AMBIGUOUS if language is vague
-                    -MARK INCONCLUSIVE if the retrieved context lacks sufficient info
-                    -Cite specific sources numbers(eg. source 1) for every claim
-                    -IGNORE external knowledge. Use only provided sources
-
-                    OUTPUT JSON SCHEMA:
-                                    {
-                                        "status": "PASS" | "FAIL" | "AMBIGUOUS" | "INCONCLUSIVE",
-                                        "confidence": "HIGH" | "MEDIUM" | "LOW",
-                                        "reasoning": "Explanation...",
-                                        "citations": ["Source 1", "Source 2"]
-                                    }
-
-
-                      """
-        user_message = f'QUERY: {query}\n\n--- sources ---\n{context_text}'
 
         try:
-            logger.info("Sending info to LLM")
-            logger.info({"event":"llm_analysis_start"})
-            cm_llm = telemetry.measure("llm") if telemetry else nullcontext()
-            with cm_llm:
-                response = self.client.chat.completions.create(
-                    model=LLM_MODEL,
-                    messages=[
-                        {"role": "system", "content":system_prompt},
-                        {"role": "user", "content":user_message}
+            intent = self.classify_intent(query, telemetry)
+            logger.info({"event": "intent_classified", "intent": intent})
 
-                    ],
-                    temperature=0.0,
-                    response_format={"type":"json_object"},
-                    timeout=20.0
+        # 2. HANDLE FAST PATHS
+            if intent == "REJECT":
+                res = self._build_inconclusive_response(
+                    "This query appears unrelated to banking compliance. Access denied.", intent
                 )
-            if telemetry:
-                telemetry.track_llm(response.usage, LLM_MODEL)
+                cache_service.set_response(query, policy_filter_id, res, is_negative=True)
+                return res
 
-            raw_content = response.choices[0].message.content
-            try:
-                data=json.loads(raw_content)
-                data['intent']=intent
-                structured_response = ComplianceResponse(**data)
-                final_response = self.verify_citations(structured_response,valid_sources)
-                return final_response.model_dump()
+                # return self._build_inconclusive_response(
+                #     "This query appears unrelated to banking compliance. Access denied.", intent
+                # )
             
-            except json.JSONDecodeError:
-                logger.error({"event": "llm_invalid_json"})
-                if telemetry: telemetry.set_error("LLM_JSON_ERROR")
-                return {"status":"error", "reason":"Model parsing failed"}
-            except ValidationError as ve:
-                logger.error({"event": "pydantic_validation_failed", "error": str(ve)})
-                if telemetry: telemetry.set_error("LLM_VALIDATION_ERROR")
-                return {"status":"error", "reason":"Model output schema Mismatch"}
+            
+            if intent == "SYSTEM_METADATA":
+                res= ComplianceResponse(
+                    status="PASS",
+                    confidence="HIGH",
+                    reasoning=f"I am the {BANK_NAME} Compliance Engine.",
+                    citations=[],
+                    intent=intent
+                ).model_dump()
+                cache_service.set_response(query, policy_filter_id, res)
+                return res
+            # logger.info(f'retrieving evidence for query: {query} (filter: {policy_filter_id})')
+            logger.info({"event": "retrieval_start", "query": query, "policy_filter_id": policy_filter_id})
+            #cost measure for retrieval
+            cm_retrieval = telemetry.measure("retrieval") if telemetry else nullcontext()
+            with cm_retrieval:
+                chunks = retrieve_balanced_chunks(query, session, policy_filter_id=policy_filter_id, telemetry=telemetry)
 
-        except Exception as e:
-            logger.error({"event": "analysis_failed", "error": str(e)})
-            if telemetry: telemetry.set_error("LLM_API_ERROR")
-            return {"status":"error", "reason":str(e)}
+            if not chunks:
+                # logger.warning("No evidence found (retriever returned 0)") 
+                logger.warning({"event": "circuit_break_empty_retrieval"}) 
+                if telemetry: telemetry.set_error("RETRIEVAL_EMPTY")
+                res = self._build_inconclusive_response("No docs found.", intent)
+                cache_service.set_response(query, policy_filter_id, res, is_negative=True)
+                return res
+            
+            #Circuit breaker logi: find a reg with no matching policy, do not audit
+
+            context_text, valid_sources, entity_counts = self.assemble_context(chunks)
+            if entity_counts["regulation"]==0:
+                # logger.warning("Circuit Break: Found 0 Regulations.")
+                logger.warning({"event": "circuit_break_no_regs"}) 
+                if telemetry: telemetry.set_error("RETRIEVAL_MISSING_REGS")
+                res=self._build_inconclusive_response("No relevant regulations found to compare policy.", intent)
+                cache_service.set_response(query, policy_filter_id, res, is_negative=True)
+                return res
+            
+            if entity_counts["policy"]==0:
+                # logger.warning("Circuit Break: Found 0 Polcies.")
+                logger.warning({"event": "circuit_break_no_policy"}) 
+                if telemetry: telemetry.set_error("RETRIEVAL_MISSING_POLICY")
+                res=self._build_inconclusive_response("No relevant policy found to audit ", intent)
+                cache_service.set_response(query, policy_filter_id, res, is_negative=True)
+                return res
+            
+            system_prompt="""
+                        Your are senior compliance officer for a tier-1 bank. Audit Internal policies against Regulatory obligations.
+
+                        INSTRUCTIONS:
+                        -Compare Policies vs Regulations
+                        -Mark PASS if fully compliant
+                        -Mark FAIL if a specific requirement is missing or contradicted
+                        -Mark AMBIGUOUS if language is vague
+                        -MARK INCONCLUSIVE if the retrieved context lacks sufficient info
+                        -Cite specific sources numbers(eg. source 1) for every claim
+                        -IGNORE external knowledge. Use only provided sources
+
+                        OUTPUT JSON SCHEMA:
+                                        {
+                                            "status": "PASS" | "FAIL" | "AMBIGUOUS" | "INCONCLUSIVE",
+                                            "confidence": "HIGH" | "MEDIUM" | "LOW",
+                                            "reasoning": "Explanation...",
+                                            "citations": ["Source 1", "Source 2"]
+                                        }
+
+
+                        """
+            user_message = f'QUERY: {query}\n\n--- sources ---\n{context_text}'
+
+            try:
+                logger.info("Sending info to LLM")
+                logger.info({"event":"llm_analysis_start"})
+                cm_llm = telemetry.measure("llm") if telemetry else nullcontext()
+                with cm_llm:
+                    response = self.client.chat.completions.create(
+                        model=LLM_MODEL,
+                        messages=[
+                            {"role": "system", "content":system_prompt},
+                            {"role": "user", "content":user_message}
+
+                        ],
+                        temperature=0.0,
+                        response_format={"type":"json_object"},
+                        timeout=20.0
+                    )
+                if telemetry:
+                    telemetry.track_llm(response.usage, LLM_MODEL)
+
+                raw_content = response.choices[0].message.content
+                try:
+                    data=json.loads(raw_content)
+                    data['intent']=intent
+                    structured_response = ComplianceResponse(**data)
+                    final_response = self.verify_citations(structured_response,valid_sources).model_dump()
+                     # STRICT NEGATIVE CACHING LOGIC
+                    is_hard_failure = False
+                    if telemetry and telemetry.metrics.get("error_type"):
+                        is_hard_failure = True
+                    elif final_response.get("status") == "INCONCLUSIVE" and "No docs found" in final_response.get("reasoning", ""):
+                        is_hard_failure = True
+                    cache_service.set_response(query, policy_filter_id, final_response, is_negative=is_hard_failure)
+                    return final_response
+                
+                # except json.JSONDecodeError:
+                #     logger.error({"event": "llm_invalid_json"})
+                #     if telemetry: telemetry.set_error("LLM_JSON_ERROR")
+                #     return {"status":"error", "reason":"Model parsing failed"}
+                # except ValidationError as ve:
+                #     logger.error({"event": "pydantic_validation_failed", "error": str(ve)})
+                #     if telemetry: telemetry.set_error("LLM_VALIDATION_ERROR")
+                #     return {"status":"error", "reason":"Model output schema Mismatch"}
+                except Exception as ve:
+                    logger.error({"event": "pydantic_validation_failed", "error": type(ve).__name__})
+                    if telemetry: telemetry.set_error("LLM_VALIDATION_ERROR")
+                    res = self._build_error_response("Model output schema Mismatch", intent)
+                    cache_service.set_response(query, policy_filter_id, res, is_negative=True)
+                    return res
+
+            except Exception as e:
+                logger.error({"event": "analysis_failed", "error": str(e)})
+                if telemetry: telemetry.set_error("LLM_API_ERROR")
+                res= self._build_error_response(str(e), intent)
+                cache_service.set_response(query, policy_filter_id, res, is_negative=True)
+                return res
+        
+        finally:
+            if lock_token: cache_service.release_lock(lock_key, lock_token)
 
 
         

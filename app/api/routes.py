@@ -33,6 +33,10 @@ def save_metrics_background(intent: str, status_code: int, endpoint: str, teleme
             intent=intent,
             status_code=status_code,
             error_type=data.get("error_type"),
+            cache_layer = data.get("cache_layer"),
+            is_cache_hit = data.get("is_cache_hit",False),
+            cache_lookup_ms = data.get("cache_lookup_ms",0.0),
+
             total_latency_ms=data["total_latency_ms"],
             routing_latency_ms=data["routing_ms"],
             retrieval_latency_ms=data["retrieval_ms"],
@@ -41,6 +45,7 @@ def save_metrics_background(intent: str, status_code: int, endpoint: str, teleme
             completion_tokens=data["completion_tokens"],
             total_tokens=data["prompt_tokens"] + data["completion_tokens"],
             cost_usd=data["cost_usd"],
+
             model_name=data["model_str"]
         )
         

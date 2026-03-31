@@ -128,6 +128,11 @@ class RequestMetric(Base):
     completion_tokens = Column(Integer, default=0)
     total_tokens = Column(Integer, default=0)
     cost_usd = Column(Float, default=0.0)
+
+    # cache layer
+    is_cache_hit = Column(Boolean, default=False,nullable=False)
+    cache_lookup_ms = Column(Float,default=0.0)
+    cache_layer = Column(String, nullable=True)
     
     
     model_name = Column(String, nullable=True)
@@ -148,7 +153,7 @@ class Users(Base):
 
     is_active = Column(Boolean, default=True, nullable=False)
 
-    
+
 
 
 
