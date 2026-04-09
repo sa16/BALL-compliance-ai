@@ -94,20 +94,23 @@ class ComplianceAgent:
                             OUTPUT JSON: {"category": "COMPLIANCE_AUDIT" | "SYSTEM_METADATA" | "REJECT"}
                             """
             try:
-                response= self.client.chat.completions.create(
-                    model=LLM_MODEL,
-                    messages=[{"role": "system", "content": system_prompt},
-                            {"role": "user", "content": query}],
-                    temperature=0.0,
-                    max_tokens=50,
-                    response_format={"type":"json_object"},
-                    timeout=5.0
-                    )
-                telemetry.track_llm(response.usage, LLM_MODEL)
-                data = json.loads(response.choices[0].message.content)
-                intent = IntentResponse(**data).category
+                #LLM Toggle 
+                if os.getenv("MOCK_LLM", "false").lower() == "true" : intent = "COMPLIANCE_AUDIT"
+                else:
+                    response= self.client.chat.completions.create(
+                        model=LLM_MODEL,
+                        messages=[{"role": "system", "content": system_prompt},
+                                {"role": "user", "content": query}],
+                        temperature=0.0,
+                        max_tokens=50,
+                        response_format={"type":"json_object"},
+                        timeout=5.0
+                        )
+                    telemetry.track_llm(response.usage, LLM_MODEL)
+                    data = json.loads(response.choices[0].message.content)
+                    intent = IntentResponse(**data).category
 
-                #save to redis
+                    #save to redis
                 cache_service.set_intent(query, intent)
 
                 return intent
@@ -313,6 +316,17 @@ class ComplianceAgent:
                 logger.info({"event":"llm_analysis_start"})
                 cm_llm = telemetry.measure("llm") if telemetry else nullcontext()
                 with cm_llm:
+                    #LLM toggle
+                    if os.getenv("MOCK_LLM", "false").lower()=="true": 
+                        time.sleep(0.5)
+                        final_response = ComplianceResponse(
+                            status="PASS",
+                            confidence= "HIGH",
+                            reasoning="MOCKED LLM RESPONSE FOR LOAD TESTING.",
+                            citation=valid_sources[:2],
+                            intent = intent
+                        ).model_dump()
+                    
                     response = self.client.chat.completions.create(
                         model=LLM_MODEL,
                         messages=[

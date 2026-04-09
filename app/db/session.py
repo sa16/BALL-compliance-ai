@@ -39,7 +39,7 @@ def init_db_connection():
 
     while retries > 0: 
         try:
-            engine = create_engine(db_url, pool_pre_ping=True)
+            engine = create_engine(db_url, pool_pre_ping=True, pool_size=50, pool_timeout=30, max_overflow=50, pool_recycle=1800)
             #quick connection test
             connection = engine.connect()
             connection.close()
