@@ -113,7 +113,7 @@ def login_for_access_token(response: Response, form_data: OAuth2PasswordRequestF
 
     response.set_cookie(
         secure=IS_PROD,
-        samesite="strict" if IS_PROD else "lax",
+        samesite="none" if IS_PROD else "lax",
         httponly=True,
         key="access_token",
         value=access_token,
