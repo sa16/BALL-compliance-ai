@@ -22,7 +22,7 @@ oauth2_schema = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
 
 #env check for cookie sercurity
 
-IS_PROD = os.getenv("ENVIRONMENT","").lower=="production"
+IS_PROD = os.getenv("ENVIRONMENT","").lower()=="production"
 
 def get_token_from_request(request: Request, bearer_token: str = Depends(oauth2_schema)):
     cookie_token = request.cookies.get("access_token")
@@ -32,7 +32,7 @@ def get_token_from_request(request: Request, bearer_token: str = Depends(oauth2_
         return cookie_token
     if bearer_token and bearer_token not in ["null", "undefined"]:
         return bearer_token
-
+    return None
 
 def get_current_user(token: str=Depends(get_token_from_request),db= Depends(get_db)):
     credentials_exception=HTTPException(
@@ -41,6 +41,10 @@ def get_current_user(token: str=Depends(get_token_from_request),db= Depends(get_
         headers={"WWW-authenticate": "Bearer"},
 
     )
+
+    if not token:
+        logger.warning({"event": "auth_failed", "reason": "missing_token"})
+        raise credentials_exception
 
     decoded = decode_access_token(token)
     if not decoded or not decoded.get("valid"):
@@ -52,6 +56,8 @@ def get_current_user(token: str=Depends(get_token_from_request),db= Depends(get_
     
     payload = decoded.get("payload")
     user_id = payload.get("sub")
+
+
 
     #type checking
     if not isinstance(user_id, str):
