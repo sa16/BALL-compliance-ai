@@ -26,8 +26,12 @@ IS_PROD = os.getenv("ENVIRONMENT","").lower=="production"
 
 def get_token_from_request(request: Request, bearer_token: str = Depends(oauth2_schema)):
     cookie_token = request.cookies.get("access_token")
-    if cookie_token: return cookie_token
-    return bearer_token
+    # if cookie_token: return cookie_token
+    # return bearer_token
+    if cookie_token and cookie_token not in ["null", "undefined"]:
+        return cookie_token
+    if bearer_token and bearer_token not in ["null", "undefined"]:
+        return bearer_token
 
 
 def get_current_user(token: str=Depends(get_token_from_request),db= Depends(get_db)):
