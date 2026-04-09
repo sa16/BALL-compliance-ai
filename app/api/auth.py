@@ -126,7 +126,7 @@ def login_for_access_token(response: Response, form_data: OAuth2PasswordRequestF
 
 @router.post("/logout")
 def logout(response: Response):
-    response.delete_cookie("access_token", secure=IS_PROD, samesite="strict" if IS_PROD else "lax")
+    response.delete_cookie("access_token", secure=IS_PROD, samesite="none" if IS_PROD else "lax")
     return {"message": "log out successful"}
 
 @router.get("/bootstrap") #the Bootstrap Endpoint (Combines /me and /policies to cut latency)
